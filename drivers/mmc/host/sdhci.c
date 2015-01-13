@@ -105,7 +105,7 @@ static void sdhci_dump_state(struct sdhci_host *host)
 	sdhci_dump_rpm_info(host);
 }
 
-static void sdhci_dumpregs(struct sdhci_host *host)
+void sdhci_dumpregs(struct sdhci_host *host)
 {
 	pr_info(DRIVER_NAME ": =========== REGISTER DUMP (%s)===========\n",
 		mmc_hostname(host->mmc));
@@ -169,6 +169,7 @@ static void sdhci_dumpregs(struct sdhci_host *host)
 	sdhci_dump_state(host);
 	pr_info(DRIVER_NAME ": ===========================================\n");
 }
+EXPORT_SYMBOL(sdhci_dumpregs);
 
 #define MAX_PM_QOS_TIMEOUT_VALUE	100000 /* 100 ms */
 static ssize_t
