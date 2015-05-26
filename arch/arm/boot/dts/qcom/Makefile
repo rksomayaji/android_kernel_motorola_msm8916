@@ -225,6 +225,7 @@ dtb-$(CONFIG_ARCH_MSM8916) += msm8939-lux-p1.dtb
 dtb-$(CONFIG_ARCH_MSM8916) += msm8939-lux-p1b.dtb
 dtb-$(CONFIG_ARCH_MSM8916) += msm8939-lux-p1c.dtb
 dtb-$(CONFIG_ARCH_MSM8916) += msm8939-lux-p2a.dtb
+dtb-$(CONFIG_ARCH_MSM8916) += msm8939-lux-p2c.dtb
 else ifeq ($(CONFIG_MMI_OSPREY_DTB),y)
 # Osprey
 dtb-$(CONFIG_ARCH_MSM8916) += msm8916-osprey-p0.dtb
