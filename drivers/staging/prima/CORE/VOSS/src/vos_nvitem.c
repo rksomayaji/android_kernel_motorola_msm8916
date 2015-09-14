@@ -58,6 +58,7 @@
 #include <net/cfg80211.h>
 #include <linux/firmware.h>
 #include <linux/vmalloc.h>
+
 //Moto, read MACs from boot params
 #include <linux/of.h>
 #include <linux/of_address.h>
@@ -97,6 +98,7 @@ static v_BOOL_t crda_regulatory_run_time_entry_valid = VOS_FALSE;
 #define MAGIC_NUMBER            0xCAFEBABE
 
 #define MIN(a, b) (a > b ? b : a)
+#define MAX(a, b) (a > b ? a : b)
 
 #ifdef MOTO_UTAGS_MAC
 #define WIFI_MAC_BOOTARG "androidboot.wifimacaddr="
@@ -3574,12 +3576,7 @@ int vos_update_nv_table_from_wiphy_band(void *hdd_ctx,
         for (j = 0; j < wiphy->bands[i]->n_channels; j++)
         {
              if (IEEE80211_BAND_2GHZ == i && eCSR_BAND_5G == nBandCapability)
-             {
-                 if (WLAN_HDD_IS_SOCIAL_CHANNEL(wiphy->bands[i]->channels[j].center_freq) )
-                     wiphy->bands[i]->channels[j].flags &= ~IEEE80211_CHAN_DISABLED;
-                 else
-                     wiphy->bands[i]->channels[j].flags |= IEEE80211_CHAN_DISABLED;
-             }
+                  wiphy->bands[i]->channels[j].flags |= IEEE80211_CHAN_DISABLED;
              else if (IEEE80211_BAND_5GHZ == i && eCSR_BAND_24 == nBandCapability)
                   wiphy->bands[i]->channels[j].flags |= IEEE80211_CHAN_DISABLED;
 

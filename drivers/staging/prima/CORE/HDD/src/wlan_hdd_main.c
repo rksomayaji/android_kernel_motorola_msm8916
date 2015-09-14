@@ -141,9 +141,6 @@ int wlan_hdd_ftm_start(hdd_context_t *pAdapter);
 #define MEMORY_DEBUG_STR ""
 #endif
 #define MAX_WAIT_FOR_ROC_COMPLETION 3
-
-#define MAX_RESTART_DRIVER_EVENT_LENGTH 30
-
 /* the Android framework expects this param even though we don't use it */
 #define BUF_LEN 20
 static char fwpath_buffer[BUF_LEN];
@@ -204,7 +201,6 @@ static struct wake_lock wlan_wake_lock;
 #endif
 /* set when SSR is needed after unload */
 static e_hdd_ssr_required isSsrRequired = HDD_SSR_NOT_REQUIRED;
-static struct wake_lock wlan_wake_lock_scan; //Mot IKHSS7-28961: Incorrect empty scan results
 
 //internal function declaration
 static VOS_STATUS wlan_hdd_framework_restart(hdd_context_t *pHddCtx);
@@ -6891,6 +6887,11 @@ VOS_STATUS hdd_stop_adapter( hdd_context_t *pHddCtx, hdd_adapter_t *pAdapter,
          if( hdd_connIsConnected(pstation) ||
              (pstation->conn_info.connState == eConnectionState_Connecting) )
          {
+#ifdef FEATURE_WLAN_TDLS
+              mutex_lock(&pHddCtx->tdls_lock);
+              wlan_hdd_tdls_exit(pAdapter, TRUE);
+              mutex_unlock(&pHddCtx->tdls_lock);
+#endif
             if (pWextState->roamProfile.BSSType == eCSR_BSS_TYPE_START_IBSS)
                 halStatus = sme_RoamDisconnect(pHddCtx->hHal,
                                              pAdapter->sessionId,
@@ -7190,6 +7191,11 @@ VOS_STATUS hdd_reset_all_adapters( hdd_context_t *pHddCtx )
       }
 #endif
 
+#ifdef FEATURE_WLAN_TDLS
+      mutex_lock(&pHddCtx->tdls_lock);
+      wlan_hdd_tdls_exit(pAdapter, TRUE);
+      mutex_unlock(&pHddCtx->tdls_lock);
+#endif
       status = hdd_get_next_adapter ( pHddCtx, pAdapterNode, &pNext );
       pAdapterNode = pNext;
    }
@@ -7706,8 +7712,6 @@ static void hdd_set_multicast_list(struct net_device *dev)
       hddLog(VOS_TRACE_LEVEL_INFO,
             "%s: allow all multicast frames", __func__);
       pAdapter->mc_addr_list.mc_cnt = 0;
-      if(pAdapter->device_mode == WLAN_HDD_INFRA_STATION)
-          wlan_hdd_update_v6_filters(pAdapter, 1); // IKJB42MAIN-1244, Motorola, a19091
    }
    else 
    {
@@ -7734,9 +7738,6 @@ static void hdd_set_multicast_list(struct net_device *dev)
                MAC_ADDR_ARRAY(pAdapter->mc_addr_list.addr[i]));
          i++;
       }
-      if(pAdapter->device_mode == WLAN_HDD_INFRA_STATION)
-          wlan_hdd_update_v6_filters(pAdapter, 0); // IKJB42MAIN-1244, Motorola, a19091
-
    }
    return;
 }
@@ -8316,15 +8317,6 @@ void hdd_allow_suspend(void)
     wcnss_allow_suspend();
 #endif
 }
-
-//Begin Mot IKHSS7-28961 : Incorrect emtpty scan results because of againg out
-void hdd_prevent_suspend_after_scan(long hz)
-{
-  wake_lock_timeout(&wlan_wake_lock_scan, hz);
-}
-//END IKHSS7-28961
-
-
 
 void hdd_prevent_suspend_timeout(v_U32_t timeout)
 {
@@ -9390,6 +9382,10 @@ int hdd_wlan_startup(struct device *dev )
 #endif
    /* Send the update default channel list to the FW*/
    sme_UpdateChannelList(pHddCtx->hHal);
+
+   /* Fwr capabilities received, Set the Dot11 mode */
+   sme_SetDefDot11Mode(pHddCtx->hHal);
+
 #ifndef CONFIG_ENABLE_LINUX_REG
    /*updating wiphy so that regulatory user hints can be processed*/
    if (wiphy)
@@ -9547,6 +9543,9 @@ static int hdd_driver_init( void)
 #ifdef HAVE_WCNSS_CAL_DOWNLOAD
    int max_retries = 0;
 #endif
+#ifdef HAVE_CBC_DONE
+   int max_cbc_retries = 0;
+#endif
 
 #ifdef WLAN_LOGGING_SOCK_SVC_ENABLE
    wlan_logging_sock_init_svc();
@@ -9556,7 +9555,6 @@ static int hdd_driver_init( void)
 
 #ifdef WLAN_OPEN_SOURCE
    wake_lock_init(&wlan_wake_lock, WAKE_LOCK_SUSPEND, "wlan");
-   wake_lock_init(&wlan_wake_lock_scan, WAKE_LOCK_SUSPEND, "wlan_scan"); //Mot IKHSS7-28961: Incorrect empty scan
 #endif
 
    hddTraceInit();
@@ -9576,11 +9574,11 @@ static int hdd_driver_init( void)
    while (!wcnss_device_ready() && 5 >= ++max_retries) {
        msleep(1000);
    }
+
    if (max_retries >= 5) {
       hddLog(VOS_TRACE_LEVEL_FATAL,"%s: WCNSS driver not ready", __func__);
 #ifdef WLAN_OPEN_SOURCE
       wake_lock_destroy(&wlan_wake_lock);
-      wake_lock_destroy(&wlan_wake_lock_scan);
 #endif
 
 #ifdef WLAN_LOGGING_SOCK_SVC_ENABLE
@@ -9588,6 +9586,15 @@ static int hdd_driver_init( void)
 #endif
 
       return -ENODEV;
+   }
+#endif
+
+#ifdef HAVE_CBC_DONE
+   while (!wcnss_cbc_complete() && 10 >= ++max_cbc_retries) {
+       msleep(1000);
+   }
+   if (max_cbc_retries >= 10) {
+      hddLog(VOS_TRACE_LEVEL_FATAL, "%s:CBC not completed", __func__);
    }
 #endif
 
@@ -9645,7 +9652,6 @@ static int hdd_driver_init( void)
 
 #ifdef WLAN_OPEN_SOURCE
       wake_lock_destroy(&wlan_wake_lock);
-      wake_lock_destroy(&wlan_wake_lock_scan); //Mot IKHSS7-28961: Incorrect empty scan results
 #endif
 
 #ifdef WLAN_LOGGING_SOCK_SVC_ENABLE
@@ -9725,9 +9731,9 @@ static void hdd_driver_exit(void)
    //Get the HDD context.
    pHddCtx = (hdd_context_t *)vos_get_context(VOS_MODULE_ID_HDD, pVosContext );
 
-   if (!pHddCtx)
+   if(!pHddCtx)
    {
-       hddLog(VOS_TRACE_LEVEL_FATAL,"%s: module exit called before probe",__func__);
+      hddLog(VOS_TRACE_LEVEL_FATAL,"%s: module exit called before probe",__func__);
    }
    else
    {
@@ -9801,7 +9807,6 @@ static void hdd_driver_exit(void)
 done:
 #ifdef WLAN_OPEN_SOURCE
    wake_lock_destroy(&wlan_wake_lock);
-   wake_lock_destroy(&wlan_wake_lock_scan); //Mot IKHSS7-28961: Incorrect empty scan results
 #endif
 
    pr_info("%s: driver unloaded\n", WLAN_MODULE_NAME);
@@ -10114,27 +10119,6 @@ wlan_hdd_is_GO_power_collapse_allowed (hdd_context_t* pHddCtx)
           return FALSE;
 
 }
-
-// BEGIN MOTOROLA IKJB42MAIN-274, dpn473, 01/02/2013, Add flag to disable/enable MCC mode
-v_U8_t hdd_get_mcc_mode( void )
-{
-    v_CONTEXT_t pVosContext = vos_get_global_context( VOS_MODULE_ID_HDD, NULL );
-    hdd_context_t *pHddCtx;
-
-    if (NULL != pVosContext)
-    {
-        pHddCtx = vos_get_context( VOS_MODULE_ID_HDD, pVosContext);
-        if (NULL != pHddCtx)
-        {
-            return (v_U8_t)pHddCtx->cfg_ini->enableMCC;
-        }
-    }
-    /* we are in an invalid state :( */
-    hddLog(LOGE, "%s: Invalid context", __func__);
-    return (v_U8_t)0;
-}
-// END IKJB42MAIN-274
-
 /* Decide whether to allow/not the apps power collapse. 
  * Allow apps power collapse if we are in connected state.
  * if not, allow only if we are in IMPS  */
@@ -10175,10 +10159,24 @@ v_BOOL_t hdd_is_apps_power_collapse_allowed(hdd_context_t* pHddCtx)
         {
             if (((pConfig->fIsImpsEnabled || pConfig->fIsBmpsEnabled)
                  && (pmcState != IMPS && pmcState != BMPS && pmcState != UAPSD
-                  &&  pmcState != STOPPED && pmcState != STANDBY)) ||
+                  &&  pmcState != STOPPED && pmcState != STANDBY &&
+                      pmcState != WOWL)) ||
                  (eANI_BOOLEAN_TRUE == scanRspPending) ||
                  (eANI_BOOLEAN_TRUE == inMiddleOfRoaming))
             {
+                if(pmcState == FULL_POWER &&
+                   sme_IsCoexScoIndicationSet(pHddCtx->hHal))
+                {
+                    /*
+                     * When SCO indication comes from Coex module , host will
+                     * enter in to full power mode, but this should not prevent
+                     * apps processor power collapse.
+                     */
+                    hddLog(LOG1,
+                       FL("Allow apps power collapse"
+                          "even when sco indication is set"));
+                    return TRUE;
+                }
                 hddLog( LOGE, "%s: do not allow APPS power collapse-"
                     "pmcState = %d scanRspPending = %d inMiddleOfRoaming = %d",
                     __func__, pmcState, scanRspPending, inMiddleOfRoaming );
@@ -10388,8 +10386,18 @@ static VOS_STATUS wlan_hdd_framework_restart(hdd_context_t *pHddCtx)
 {
    VOS_STATUS status = VOS_STATUS_SUCCESS;
    hdd_adapter_list_node_t *pAdapterNode = NULL, *pNext = NULL;
-   unsigned char restart_notification[MAX_RESTART_DRIVER_EVENT_LENGTH + 1];
-   union iwreq_data wrqu;
+   int len = (sizeof (struct ieee80211_mgmt));
+   struct ieee80211_mgmt *mgmt = NULL; 
+   
+   /* Prepare the DEAUTH managment frame with reason code */
+   mgmt =  kzalloc(len, GFP_KERNEL);
+   if(mgmt == NULL) 
+   {
+      VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_FATAL, 
+            "%s: memory allocation failed (%d bytes)", __func__, len);
+      return VOS_STATUS_E_NOMEM;
+   }
+   mgmt->u.deauth.reason_code = WLAN_REASON_DISASSOC_LOW_ACK;
 
    /* Iterate over all adapters/devices */
    status =  hdd_get_front_adapter ( pHddCtx, &pAdapterNode );
@@ -10404,21 +10412,27 @@ static VOS_STATUS wlan_hdd_framework_restart(hdd_context_t *pHddCtx)
                pAdapterNode->pAdapter->dev->name,
                pAdapterNode->pAdapter->device_mode,
                pHddCtx->hdd_restart_retries + 1);
-
-          /* Notify the wpa supplicant of wcnss restart by sending the custom event */
-          memset(&wrqu, 0 , sizeof(wrqu));
-          memset(restart_notification, 0, sizeof(restart_notification));
-
-          strlcpy(restart_notification, "QCOM: RESTART_DRIVER_DXE", sizeof(restart_notification));
-
-          wrqu.data.pointer = restart_notification;
-          wrqu.data.length = strlen(restart_notification);
-
-          wireless_send_event(pAdapterNode->pAdapter->dev, IWEVCUSTOM, &wrqu, restart_notification);
+         /* 
+          * CFG80211 event to restart the driver
+          * 
+          * 'cfg80211_send_unprot_deauth' sends a 
+          * NL80211_CMD_UNPROT_DEAUTHENTICATE event to supplicant at any state 
+          * of SME(Linux Kernel) state machine.
+          *
+          * Reason code WLAN_REASON_DISASSOC_LOW_ACK is currently used to restart
+          * the driver.
+          *
+          */
+         
+         cfg80211_send_unprot_deauth(pAdapterNode->pAdapter->dev, (u_int8_t*)mgmt, len );  
       }
       status = hdd_get_next_adapter ( pHddCtx, pAdapterNode, &pNext );
       pAdapterNode = pNext;
    } while((NULL != pAdapterNode) && (VOS_STATUS_SUCCESS == status));
+
+
+   /* Free the allocated management frame */
+   kfree(mgmt);
 
    /* Retry until we unload or reach max count */
    if(++pHddCtx->hdd_restart_retries < WLAN_HDD_RESTART_RETRY_MAX_CNT) 
@@ -10540,28 +10554,53 @@ VOS_STATUS hdd_issta_p2p_clientconnected(hdd_context_t *pHddCtx)
     return sme_isSta_p2p_clientConnected(pHddCtx->hHal);
 }
 
+/*
+ * API to find if there is any session connected
+ */
+VOS_STATUS hdd_is_any_session_connected(hdd_context_t *pHddCtx)
+{
+    return sme_is_any_session_connected(pHddCtx->hHal);
+}
+
+
 int wlan_hdd_scan_abort(hdd_adapter_t *pAdapter)
 {
     hdd_context_t *pHddCtx = WLAN_HDD_GET_CTX(pAdapter);
     hdd_scaninfo_t *pScanInfo = NULL;
     long status = 0;
+    tSirAbortScanStatus abortScanStatus;
 
     pScanInfo = &pHddCtx->scan_info;
     if (pScanInfo->mScanPending)
     {
-        INIT_COMPLETION(pScanInfo->abortscan_event_var);
-        hdd_abort_mac_scan(pHddCtx, pScanInfo->sessionId,
-                                    eCSR_SCAN_ABORT_DEFAULT);
+        abortScanStatus = hdd_abort_mac_scan(pHddCtx, pScanInfo->sessionId,
+                                             eCSR_SCAN_ABORT_DEFAULT);
+        VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO,
+                  FL("abortScanStatus: %d"), abortScanStatus);
 
-        status = wait_for_completion_interruptible_timeout(
+        /* If there is active scan command lets wait for the completion else
+         * there is no need to wait as scan command might be in the SME pending
+         * command list.
+         */
+        if (abortScanStatus == eSIR_ABORT_ACTIVE_SCAN_LIST_NOT_EMPTY)
+        {
+            INIT_COMPLETION(pScanInfo->abortscan_event_var);
+            status = wait_for_completion_interruptible_timeout(
                            &pScanInfo->abortscan_event_var,
                            msecs_to_jiffies(5000));
-        if (0 >= status)
-        {
-           VOS_TRACE( VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
+            if (0 >= status)
+            {
+               VOS_TRACE( VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
                   "%s: Timeout or Interrupt occurred while waiting for abort"
                   "scan, status- %ld", __func__, status);
-            return -ETIMEDOUT;
+                return -ETIMEDOUT;
+            }
+        }
+        else if (abortScanStatus == eSIR_ABORT_SCAN_FAILURE)
+        {
+            VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
+                      FL("hdd_abort_mac_scan failed"));
+            return -VOS_STATUS_E_FAILURE;
         }
     }
     return 0;
