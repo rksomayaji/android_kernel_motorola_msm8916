@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2014 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2015 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -24598,7 +24598,6 @@ WDI_CopyWDIStaCtxToHALStaCtx
 #endif
    /*Lightweight function - no sanity checks and no unecessary code to increase
     the chances of getting inlined*/
-
   wpalMemoryCopy(phalConfigSta->bssId,
                   pwdiConfigSta->macBSSID, WDI_MAC_ADDR_LEN);
 
@@ -24628,7 +24627,11 @@ WDI_CopyWDIStaCtxToHALStaCtx
   phalConfigSta->us32MaxAmpduDuration    = pwdiConfigSta->us32MaxAmpduDuratio;
   phalConfigSta->fDsssCckMode40Mhz       = pwdiConfigSta->ucDsssCckMode40Mhz;
   phalConfigSta->encryptType             = pwdiConfigSta->ucEncryptType;
-
+  if (phalConfigSta_V1 == NULL)
+  {
+      /* Set reserved bit only when hardware doesn't support 11AC */
+      phalConfigSta->reserved             = pwdiConfigSta->ucHtLdpcEnabled;
+  }
   phalConfigSta->mimoPS = WDI_2_HAL_MIMO_PS(pwdiConfigSta->wdiMIMOPS);
 
   phalConfigSta->supportedRates.opRateMode =
@@ -27093,8 +27096,7 @@ WDI_ProcessReceiveFilterSetFilterReq
    if ( NULL == pBSSSes )
    {
        WPAL_TRACE( eWLAN_MODULE_DAL_CTRL, eWLAN_PAL_TRACE_LEVEL_ERROR,
-                 " %s : Association for this BSSID does not exist, filter Id =%d",
-                 __func__, pwdiSetRcvPktFilterReqInfo->wdiPktFilterCfg.filterId); // IKJB42MAIN-1244, Motorola, a19091
+                 " %s : Association for this BSSID does not exist",__func__);
        return WDI_STATUS_E_FAILURE; 
    }
 
@@ -27481,8 +27483,7 @@ WDI_ProcessReceiveFilterClearFilterReq
    if ( NULL == pBSSSes )
    {
        WPAL_TRACE( eWLAN_MODULE_DAL_CTRL, eWLAN_PAL_TRACE_LEVEL_ERROR,
-                 " %s : Association for this BSSID does not exist, filter ID = %d",
-                 __func__, pwdiRcvFltPktClearReqParamsType->filterClearParam.filterId); // IKJB42MAIN-1244, Motorola, a19091
+                 " %s : Association for this BSSID does not exist",__func__);
        return WDI_STATUS_E_FAILURE; 
    }
 

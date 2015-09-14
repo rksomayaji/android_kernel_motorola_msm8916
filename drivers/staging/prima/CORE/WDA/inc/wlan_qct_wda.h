@@ -507,6 +507,15 @@ typedef struct
    v_PVOID_t            wdaWdiApiMsgParam;      /* WDI API paramter tracking */
 } tWDA_ReqParams; 
 
+typedef struct
+{
+   v_PVOID_t            pWdaContext;             /* pointer to WDA context*/
+   v_PVOID_t            wdaMsgParam;            /* PE parameter tracking */
+   v_PVOID_t            wdaWdiApiMsgParam;      /* WDI API paramter tracking */
+   v_BOOL_t             wdaHALDumpAsync;        /* Async Request */
+
+} tWDA_HalDumpReqParams;
+
 /*
  * FUNCTION: WDA_open
  * open WDA context
@@ -1157,7 +1166,6 @@ tSirRetStatus uMacPostCtrlMsg(void* pSirGlobal, tSirMbMsg* pMb);
 #define WDA_PACKET_COALESCING_FILTER_MATCH_COUNT_REQ    SIR_HAL_PACKET_COALESCING_FILTER_MATCH_COUNT_REQ
 #define WDA_PACKET_COALESCING_FILTER_MATCH_COUNT_RSP    SIR_HAL_PACKET_COALESCING_FILTER_MATCH_COUNT_RSP
 #define WDA_RECEIVE_FILTER_CLEAR_FILTER_REQ             SIR_HAL_RECEIVE_FILTER_CLEAR_FILTER_REQ   
-#define WDA_RECEIVE_FILTER_SET_FILTER_MC_REQ            SIR_HAL_RECEIVE_FILTER_SET_FILTER_MC_REQ // IKJB42MAIN-1244, Motorola, a19091
 #endif // WLAN_FEATURE_PACKET_FILTERING
 
 #define WDA_SET_POWER_PARAMS_REQ   SIR_HAL_SET_POWER_PARAMS_REQ
@@ -1899,11 +1907,12 @@ WDA_DS_GetTxFlowMask
 
    IN
     pMac             MAC global pointer
-    cmd               Hal dump command
-    arg1              Dump command argument 1
-    arg2              Dump command argument 2
-    arg3              Dump command argument 3
-    arg4              Dump command argument 4
+    cmd              Hal dump command
+    arg1             Dump command argument 1
+    arg2             Dump command argument 2
+    arg3             Dump command argument 3
+    arg4             Dump command argument 4
+    async            Asynchronous event. Doesn't wait for rsp.
 
    OUT
        pBuffer          Dump command Response buffer
@@ -1917,7 +1926,7 @@ WDA_DS_GetTxFlowMask
 ============================================================================*/
 VOS_STATUS WDA_HALDumpCmdReq(tpAniSirGlobal   pMac,tANI_U32 cmd, 
                  tANI_U32   arg1, tANI_U32   arg2, tANI_U32   arg3,
-                 tANI_U32   arg4, tANI_U8   *pBuffer);
+                 tANI_U32   arg4, tANI_U8   *pBuffer, wpt_boolean async);
 
 /*==========================================================================
    FUNCTION    WDA_featureCapsExchange
